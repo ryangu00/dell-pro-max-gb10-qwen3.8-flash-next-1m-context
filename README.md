@@ -58,9 +58,11 @@ Full `--hf-overrides` JSON used for the 1M window:
 7. **Validate the window.** Run `scripts/needle_probe.py` at 400K / 700K / 950K depths and the cold/hit prefill timing. (The 27-sample matrix — three depths × nine needles against the private corpus — and the K1 throughput numbers are reported only; see [`docs/results.md`](docs/results.md).) Example probe:
 
    ```
-   python3 scripts/needle_probe.py http://<HEAD_IP>:8899/v1 <MODEL> 950000 --depth 0.37 --lang zh
+   python3 scripts/needle_probe.py http://<HEAD_IP>:8899/v1 <MODEL> 950000 --depth 0.37
    # prints: prompt=<N> tok | wall=<s>s | hit=yes|no
    ```
+
+   The published probe is English-only; the runs reported above used a Chinese-language variant of the same probe (same needle placement and the same digit-boundary expect check; the Chinese variant additionally rejected a negated answer in Chinese), which is not published.
 
 The switch between the 1M YaRN tier and the native 262K tier is done via the switch script; an engine restart takes ≈4 minutes (author-reported, from the private switch script; start/stop boundary not defined here).
 
@@ -145,7 +147,7 @@ See [`docs/pitfalls.md`](docs/pitfalls.md) for symptom / root cause / fix / how-
 - `README.md` — this document.
 - `docs/results.md` — the 1M validation table and the native-vs-1M delta table, each with its measurement conditions.
 - `docs/pitfalls.md` — the pitfalls expanded: symptom / root cause / fix / how we found it.
-- `scripts/needle_probe.py` — the needle-in-a-haystack probe (stdlib only); run it to reproduce the needle recall numbers.
+- `scripts/needle_probe.py` — the needle-in-a-haystack probe (stdlib only); run it to make your own needle check; the 27-sample recall numbers above are author-reported from the Chinese-language variant and are not reproduced by this script.
 - `docs/make_banner.py` — the banner generator (pure PIL). Pillow is required: `python3 -m pip install pillow`; the script uses macOS system fonts and falls back to PIL's default font elsewhere (layout then differs).
 
 The raw eval bank logs, question texts, per-item scoring detail, run directory names/hashes, and switch-script internals are private and are not included in this cookbook.
