@@ -8,7 +8,7 @@ deployment against the KV pool and cold-prefill path.
 
 Usage:
   needle_probe.py <base_url> <model> <approx_tokens> [--depth 0.37]
-                  [--needle "TEXT"] [--expect 771203] [--lang zh|en]
+                  [--needle "TEXT"] [--expect 771203]
                   [--max-tokens N] [--timeout 3600]
 
   base_url       OpenAI-compatible endpoint, e.g. http://<HEAD_IP>:8899/v1
@@ -20,14 +20,13 @@ Usage:
   --expect       the expected answer string (default "771203"); when --needle is
                  given without --expect, the first run of 4+ digits in the needle
                  text is extracted as the expected answer
-  --lang         filler language: zh (default) or en
   --max-tokens   max tokens for the completion (default 200)
   --timeout      per-request timeout in seconds (default 3600); a 900K-token
                  prompt can take >2400 s on this hardware
 
 Output (one line): prompt=<N> tok | wall=<s>s | hit=yes|no | answer=<...>
 A hit requires the expected string to be delimited by non-digits, so "17712030"
-does not match "771203"; an answer containing a negation word ("not"/"不是")
+does not match "771203"; an answer containing the negation word "not"
 immediately before the number counts as a miss. The reported wall time is
 end-to-end for a 24-token answer (cold prefill dominates). If the server returns
 no usage, prompt is printed as "unknown" and the exit code is 3.
@@ -39,15 +38,11 @@ import sys
 import time
 import urllib.request
 
-ZH_PARA = ("分布式系统的设计需要在一致性、可用性与分区容错之间做出取舍。"
-          "工程实践中常用副本机制提升容错,用共识协议维护状态机的一致推进,用分片扩展吞吐。")
 EN_PARA = ("Designing a distributed system means trading off consistency against "
            "availability and partition tolerance. In practice we add replicas for "
            "fault tolerance, run a consensus protocol to keep state machines in "
            "step, and shard to scale throughput across nodes.")
-ZH_QUESTION = "\n\n上面文档里提到的幸运数字是多少?只回数字。"
 EN_QUESTION = "\n\nWhat is the magic number mentioned in the document above? Reply with only the number."
-DEFAULT_NEEDLE_ZH = "【彩蛋:本文档的幸运数字是 771203。】"
 DEFAULT_NEEDLE_EN = "[Easter egg: the magic number in this document is 771203.]"
 DEFAULT_EXPECT = "771203"
 
@@ -73,8 +68,8 @@ def judge_hit(answer, expect):
 
     A hit requires `expect` to appear delimited by non-digits (or string
     boundaries), so "17712030" does not count as matching "771203". An answer
-    containing a negation word ("not" or "不是") immediately before the number
-    counts as a miss. Kept intentionally simple and documented here.
+    containing the negation word "not" immediately before the number counts
+    as a miss. Kept intentionally simple and documented here.
     """
     if not expect:
         return False
@@ -84,21 +79,20 @@ def judge_hit(answer, expect):
         return False
     # Negation immediately before the matched number -> miss.
     prefix = answer[: m.start()]
-    if prefix.rstrip().endswith("not") or prefix.rstrip().endswith("不是"):
+    if prefix.rstrip().endswith("not"):
         return False
     return True
 
 
-def build_document(approx_tokens, depth, needle, lang):
-    para = ZH_PARA if lang == "zh" else EN_PARA
-    tok_per_para = 55 if lang == "zh" else 50
+def build_document(approx_tokens, depth, needle):
+    tok_per_para = 50
     n_paras = max(1, approx_tokens // tok_per_para)
     needle_pos = int(n_paras * depth)
     parts = []
     for i in range(n_paras):
         if i == needle_pos:
             parts.append(needle)
-        parts.append(f"第{i}段:{para}" if lang == "zh" else f"Paragraph {i}: {para}")
+        parts.append(f"Paragraph {i}: {EN_PARA}")
     return "\n".join(parts)
 
 
@@ -114,7 +108,6 @@ def main():
     ap.add_argument("--expect", default=None,
                     help='expected answer string (default "771203"); when --needle is given '
                          'without --expect, the first run of 4+ digits in the needle is used')
-    ap.add_argument("--lang", choices=["zh", "en"], default="zh", help="filler language")
     ap.add_argument("--max-tokens", type=int, default=200,
                     help="max tokens for the completion (default 200)")
     ap.add_argument("--timeout", type=int, default=3600,
@@ -127,16 +120,12 @@ def main():
         print(f"depth must satisfy 0 < depth < 1 (got {args.depth})", file=sys.stderr)
         sys.exit(1)
 
-    if args.lang == "zh":
-        needle = args.needle if args.needle is not None else DEFAULT_NEEDLE_ZH
-        question = ZH_QUESTION
-    else:
-        needle = args.needle if args.needle is not None else DEFAULT_NEEDLE_EN
-        question = EN_QUESTION
+    needle = args.needle if args.needle is not None else DEFAULT_NEEDLE_EN
+    question = EN_QUESTION
 
     expect = derive_expect(args.needle, args.expect)
 
-    doc = build_document(args.approx_tokens, args.depth, needle, args.lang)
+    doc = build_document(args.approx_tokens, args.depth, needle)
     body = {
         "model": args.model,
         "messages": [{"role": "user", "content": doc + question}],
