@@ -2,7 +2,9 @@
 
 # Qwen3.8-Flash-Next at 1M context on two Dell Pro Max with GB10 — static YaRN, measured
 
-> We extend Qwen3.8-Flash-Next (abbreviated NF) from its native 262K context to a 1,000,000-token window using static YaRN rope scaling at factor 4, deployed across two Dell Pro Max with GB10 nodes running a community cluster recipe (TP2 over RoCE, fp8 KV cache, MTP4 speculative decoding). The 1M window validates cleanly: the engine reports 3,441,324–3,482,606 KV tokens (~3.44× one 1M-token request, so a 1M request occupies ~29% of the pool), needle content recall is 27/27 at 400K / 700K / 950K depths, cold prefill is stable across three repeats, and in the non-thinking validation run, c1/c4 showed no regression against the 262K reference run (c1 96.7/96.7, c4 95.8/95.8); in the thinking-mode engine-form A/B, native 262K scored 5.0 points higher on c1 than the 1M YaRN build. Two bugs surfaced and were fixed along the way — a draft-path `max_model_len` cap at 262144, and an async-scheduling × MTP race that caused runaway loops on agent tasks (fixed with the single flag `--no-async-scheduling`, which the recipe table already lists). The model's agentic category needs thinking mode; that investigation lives in a sibling cookbook. A native-262K-vs-1M comparison recommends native 262K as the default production tier with 1M YaRN available on demand (switch time ≈4 minutes via the switch script).
+> **Status (2026-10):** this two-node GB10 setup served production from 2026-09-20 to 2026-09-25 and is now the rollback tier; production moved to another machine. The measurements below remain valid for the recipe and hardware they were taken on.
+>
+> We extend Qwen3.8-Flash-Next (abbreviated NF) from its native 262K context to a 1,000,000-token window using static YaRN rope scaling at factor 4, deployed across two Dell Pro Max with GB10 nodes running a community cluster recipe (TP2 over RoCE, fp8 KV cache, MTP4 speculative decoding). The 1M window validates cleanly: the engine reports 3,441,324–3,482,606 KV tokens (~3.44× one 1M-token request, so a 1M request occupies ~29% of the pool), needle content recall is 27/27 at 400K / 700K / 950K depths, cold prefill is stable across three repeats, and in the non-thinking validation run, c1/c4 showed no regression against the 262K reference run (c1 96.7/96.7, c4 95.8/95.8); in the thinking-mode engine-form A/B, native 262K scored 5.0 points higher on c1 than the 1M YaRN build. Two bugs surfaced and were fixed along the way — a draft-path `max_model_len` cap at 262144, and an async-scheduling × MTP race that caused runaway loops on agent tasks (fixed with the single flag `--no-async-scheduling`, which the recipe table already lists). The model's agentic category needs thinking mode; that investigation lives in a sibling cookbook. A native-262K-vs-1M comparison recommends native 262K as the default production tier with 1M YaRN available on demand (switch time ≈4 minutes via the switch script). In production we initially chose the opposite default (1M always on, 2026-09-20); see the Update (2026-10) section for what the first 47 hours of real traffic showed.
 
 ## Why this matters
 
@@ -102,7 +104,30 @@ Conditions: thinking on + official thinking sampling + `qwen3_coder` + YaRN fact
 | c8-judgment | 98.3 | 98.3 (+0.0) wall 1.05× |
 | c9-long-coding | 100.0 | 100.0 (+0.0) wall 0.62× |
 
-Native 262K matches or beats the 1M tier on the five categories we measured and is faster on c9-long-coding (native took 0.62× of the 1M YaRN wall clock, i.e. YaRN took ~1.6× native). The 1M tier's value is the window itself, not a short-text advantage — hence native 262K is the recommended default production tier with 1M YaRN available on demand.
+Native 262K matches or beats the 1M tier on the five categories we measured and is faster on c9-long-coding (native took 0.62× of the 1M YaRN wall clock, i.e. YaRN took ~1.6× native). The 1M tier's value is the window itself, not a short-text advantage — hence native 262K is the recommended default production tier with 1M YaRN available on demand (this is our recommendation; our own production deployment initially ran 1M as the default, see Update 2026-10).
+
+## Update (2026-10)
+
+**What we deployed.** On 2026-09-20, production went live with 1M as the default tier, not native 262K. The stated reason was to avoid having to switch tiers; the costs we accepted are the ones this book measures: short-text knowledge QA 5.0 points lower (88.3 vs 93.3 in the table above) and long-coding wall clock about 1.6× native (native took 0.62× the 1M wall clock). These two figures are already in the book; we cite them, we did not re-measure.
+
+**Real traffic after go-live.** Measured from the serving engine's own request and token counters, n = 856 requests, window about 47 hours from about 2026-09-20 18:38 until the check on 2026-09-22, two-node GB10 setup, 1M configuration, fp8 KV cache:
+
+| Item | Value |
+|---|---|
+| Prompt length | mean 8.7K tokens; 93rd percentile at most 50K tokens; maximum at most 200K tokens |
+| Computed prompt tokens / KV pool | 1,956,722 / 3,435,666 tokens (25.19 GiB per node) |
+| Cache eviction | computed prompt tokens stayed below the pool size, so the cache did not need to evict |
+| Prefix-cache hit rate | 73.8% (5.50 million of 7.46 million prompt tokens), all served from GPU memory |
+
+**Reading (our interpretation, not a controlled test).** Every request in that window fit inside the native 262,144-token window, so on this traffic the 1M window was never needed, while the 1M configuration carried the short-text cost in the 88.3 vs 93.3 comparison. This supports the book's recommendation (native default, 1M on demand). The sample is one deployment, one workload mix, and 47 hours; a workload with many long documents would give a different answer.
+
+**Later change.** On 2026-09-26, the on-demand recommendation was implemented as automatic switching on another machine, with the native-length configuration as the default. The two-node GB10 setup in this book is the rollback tier since 2026-09-25 about 01:10.
+
+**Unresolved / not verified:**
+
+- Whether the counters include any non-production (test or evaluation) traffic was not separated.
+- "Maximum at most 200K" is the recorded bound; the exact maximum was not recorded.
+- The GB10 side never ran on-demand switching in production, so the book's 4-minute switch figure (author-reported) was never exercised under real traffic.
 
 ## What did not work (negative results)
 
